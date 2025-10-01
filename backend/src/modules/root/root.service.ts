@@ -269,6 +269,26 @@ export class RootService {
                     });
             }
 
+            // Дополнительно проксируем мета-заголовки из тела ответа панели (response.headers)
+            const panelMetaHeaders: Record<string, string> | undefined = body?.response?.headers;
+            if (panelMetaHeaders && typeof panelMetaHeaders === 'object') {
+                Object.entries(panelMetaHeaders)
+                    .filter(([key]) => {
+                        const ignoredHeaders = ['transfer-encoding', 'content-length', 'server'];
+                        return !ignoredHeaders.includes(key.toLowerCase());
+                    })
+                    .forEach(([key, value]) => {
+                        try {
+                            // Ставим мета-заголовок только если он ещё не был установлен из HTTP-ответа панели
+                            if (!res.hasHeader(key)) {
+                                res.setHeader(key, value);
+                            }
+                        } catch (_) {
+                            // пропускаем некорректные ключи
+                        }
+                    });
+            }
+
             const stats = this.computeTransformStats(transformed, vlessUuid, ssPassword, username);
             this.logger.log(
                 `[ClientApp] Transformed template: vlessUsersUpdated=${stats.vlessUsersUpdated}, ssServersUpdated=${stats.ssServersUpdated}, remarksIdUpdated=${stats.remarksIdUpdated}`,
