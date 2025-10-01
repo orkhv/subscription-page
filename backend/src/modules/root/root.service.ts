@@ -80,6 +80,9 @@ export class RootService {
 
             // Обработка специальных клиентов (приложений): Happ, Streisand, v2rayng, v2box
             if (userAgent && this.isClientApp(userAgent)) {
+                this.logger.log(
+                    `[ClientApp] UA matched, returning JSON from template. ua=${userAgent}, shortUuid=${shortUuidLocal}`,
+                );
                 return this.returnClientAppJson(clientIp, req, res, shortUuidLocal);
             }
 
@@ -191,6 +194,7 @@ export class RootService {
                 maxAge: 3_600_000, // 1 hour
             });
 
+            this.logger.debug('[Browser] Rendering subscription webpage (base64 panel data)');
             res.render('index', {
                 metaTitle: this.configService
                     .getOrThrow<string>('META_TITLE')
@@ -215,6 +219,7 @@ export class RootService {
         shortUuid: string,
     ): Promise<void> {
         try {
+            this.logger.debug('[ClientApp] Fetching raw subscription with disabled hosts');
             const rawResponse = await this.axiosService.getSubscriptionRawWithDisabledHosts(
                 clientIp,
                 shortUuid,
@@ -234,6 +239,10 @@ export class RootService {
             const vlessUuid: string | undefined = user?.vlessUuid;
             const ssPassword: string | undefined = user?.ssPassword;
 
+            this.logger.debug(
+                `[ClientApp] Extracted user fields: username=${username}, vlessUuid=${this.maskSecret(vlessUuid)}, ssPassword=${this.maskSecret(ssPassword)}`,
+            );
+
             if (!username || !vlessUuid || !ssPassword) {
                 this.logger.error(
                     `Required fields missing in raw response. username: ${username}, vlessUuid: ${vlessUuid}, ssPassword: ${!!ssPassword}`,
@@ -249,6 +258,12 @@ export class RootService {
                 ssPassword,
             });
 
+            const stats = this.computeTransformStats(transformed, vlessUuid, ssPassword, username);
+            this.logger.log(
+                `[ClientApp] Transformed template: vlessUsersUpdated=${stats.vlessUsersUpdated}, ssServersUpdated=${stats.ssServersUpdated}, remarksIdUpdated=${stats.remarksIdUpdated}`,
+            );
+
+            this.logger.debug('[ClientApp] Sending transformed JSON response');
             res.status(200).json(transformed);
         } catch (error) {
             this.logger.error('Error in returnClientAppJson', error);
@@ -259,6 +274,7 @@ export class RootService {
 
     private async loadDefaultJsonArray(): Promise<any[]> {
         if (this.defaultJsonCache) {
+            this.logger.debug('[Template] Using cached default.json');
             return this.defaultJsonCache;
         }
 
@@ -272,6 +288,7 @@ export class RootService {
         }
 
         this.defaultJsonCache = parsed;
+        this.logger.log(`[Template] Loaded /backend/default.json profiles=${parsed.length}`);
         return this.defaultJsonCache;
     }
 
@@ -331,6 +348,72 @@ export class RootService {
         }
 
         return clone;
+    }
+
+    private maskSecret(value?: string): string {
+        if (!value) return 'null';
+        if (value.length <= 8) return '****';
+        return `${value.slice(0, 4)}…${value.slice(-4)}`;
+    }
+
+    private computeTransformStats(
+        profiles: any[],
+        vlessUuid: string,
+        ssPassword: string,
+        username: string,
+    ): { vlessUsersUpdated: number; ssServersUpdated: number; remarksIdUpdated: number } {
+        let vlessUsersUpdated = 0;
+        let ssServersUpdated = 0;
+        let remarksIdUpdated = 0;
+
+        for (const profile of profiles) {
+            if (typeof profile?.remarks === 'string') {
+                if (profile.remarks === `ID: ${username}`) remarksIdUpdated += 1;
+            }
+            const outbounds = profile?.outbounds;
+            if (!Array.isArray(outbounds)) continue;
+
+            for (const outbound of outbounds) {
+                if (!outbound || typeof outbound !== 'object') continue;
+                const protocol = outbound.protocol;
+                const settings = outbound.settings;
+                if (!settings || typeof settings !== 'object') continue;
+
+                if (protocol === 'vless') {
+                    const vnext = settings.vnext;
+                    if (Array.isArray(vnext)) {
+                        for (const vn of vnext) {
+                            const users = vn?.users;
+                            if (Array.isArray(users)) {
+                                for (const user of users) {
+                                    if (user && typeof user === 'object' && user.id === vlessUuid) {
+                                        vlessUsersUpdated += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (protocol === 'shadowsocks') {
+                    const servers = settings.servers;
+                    if (Array.isArray(servers)) {
+                        for (const srv of servers) {
+                            if (
+                                srv &&
+                                typeof srv === 'object' &&
+                                typeof srv.password === 'string' &&
+                                srv.password === ssPassword
+                            ) {
+                                ssServersUpdated += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return { vlessUsersUpdated, ssServersUpdated, remarksIdUpdated };
     }
 
     private async decodeMarzbanLink(shortUuid: string): Promise<{
