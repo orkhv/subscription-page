@@ -258,6 +258,17 @@ export class RootService {
                 ssPassword,
             });
 
+            if (rawResponse.headers) {
+                Object.entries(rawResponse.headers)
+                    .filter(([key]) => {
+                        const ignoredHeaders = ['transfer-encoding', 'content-length', 'server'];
+                        return !ignoredHeaders.includes(key.toLowerCase());
+                    })
+                    .forEach(([key, value]) => {
+                        res.setHeader(key, value as any);
+                    });
+            }
+
             const stats = this.computeTransformStats(transformed, vlessUuid, ssPassword, username);
             this.logger.log(
                 `[ClientApp] Transformed template: vlessUsersUpdated=${stats.vlessUsersUpdated}, ssServersUpdated=${stats.ssServersUpdated}, remarksIdUpdated=${stats.remarksIdUpdated}`,
