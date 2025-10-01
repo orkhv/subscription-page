@@ -3,6 +3,7 @@ import { AxiosResponseHeaders } from 'axios';
 import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
+import { promises as fs } from 'node:fs';
 
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
@@ -20,6 +21,7 @@ export class RootService {
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKey?: string;
+    private defaultJsonCache: any[] | null = null;
 
     constructor(
         private readonly configService: ConfigService,
@@ -74,6 +76,11 @@ export class RootService {
 
                     shortUuidLocal = userInfo.response.response.shortUuid;
                 }
+            }
+
+            // Обработка специальных клиентов (приложений): Happ, Streisand, v2rayng, v2box
+            if (userAgent && this.isClientApp(userAgent)) {
+                return this.returnClientAppJson(clientIp, req, res, shortUuidLocal);
             }
 
             if (userAgent && this.isBrowser(userAgent)) {
@@ -143,6 +150,12 @@ export class RootService {
         return browserKeywords.some((keyword) => userAgent.includes(keyword));
     }
 
+    private isClientApp(userAgent: string): boolean {
+        const ua = userAgent.toLowerCase();
+        const appKeywords = ['happ', 'streisand', 'v2rayng', 'v2box'];
+        return appKeywords.some((kw) => ua.includes(kw));
+    }
+
     private isGenericPath(path: string): boolean {
         const genericPaths = ['favicon.ico', 'robots.txt'];
 
@@ -193,6 +206,131 @@ export class RootService {
             res.socket?.destroy();
             return;
         }
+    }
+
+    private async returnClientAppJson(
+        clientIp: string,
+        req: Request,
+        res: Response,
+        shortUuid: string,
+    ): Promise<void> {
+        try {
+            const rawResponse = await this.axiosService.getSubscriptionRawWithDisabledHosts(
+                clientIp,
+                shortUuid,
+                req.headers,
+            );
+
+            if (!rawResponse || !rawResponse.response) {
+                this.logger.error(`GetSubscriptionRawWithDisabledHosts failed, shortUuid: ${shortUuid}`);
+                res.socket?.destroy();
+                return;
+            }
+
+            const body: any = rawResponse.response as any;
+            const user = body?.response?.user;
+
+            const username: string | undefined = user?.username;
+            const vlessUuid: string | undefined = user?.vlessUuid;
+            const ssPassword: string | undefined = user?.ssPassword;
+
+            if (!username || !vlessUuid || !ssPassword) {
+                this.logger.error(
+                    `Required fields missing in raw response. username: ${username}, vlessUuid: ${vlessUuid}, ssPassword: ${!!ssPassword}`,
+                );
+                res.socket?.destroy();
+                return;
+            }
+
+            const templateArray = await this.loadDefaultJsonArray();
+            const transformed = this.transformDefaultJson(templateArray, {
+                username,
+                vlessUuid,
+                ssPassword,
+            });
+
+            res.status(200).json(transformed);
+        } catch (error) {
+            this.logger.error('Error in returnClientAppJson', error);
+            res.socket?.destroy();
+            return;
+        }
+    }
+
+    private async loadDefaultJsonArray(): Promise<any[]> {
+        if (this.defaultJsonCache) {
+            return this.defaultJsonCache;
+        }
+
+        // Жёсткий путь внутри образа/контейнера
+        const filePath = '/backend/default.json';
+        const content = await fs.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(content);
+
+        if (!Array.isArray(parsed)) {
+            throw new Error('default.json is not an array');
+        }
+
+        this.defaultJsonCache = parsed;
+        return this.defaultJsonCache;
+    }
+
+    private transformDefaultJson(
+        templateArray: any[],
+        creds: { username: string; vlessUuid: string; ssPassword: string },
+    ): any[] {
+        // Глубокое копирование, чтобы не мутировать исходник
+        const clone = JSON.parse(JSON.stringify(templateArray));
+
+        for (const profile of clone) {
+            // Обновить remarks на верхнем уровне, если это профиль с "ID: "
+            if (typeof profile?.remarks === 'string') {
+                if (profile.remarks.trim() === 'ID:' || profile.remarks === 'ID: ') {
+                    profile.remarks = `ID: ${creds.username}`;
+                }
+            }
+
+            const outbounds = profile?.outbounds;
+            if (!Array.isArray(outbounds)) continue;
+
+            for (const outbound of outbounds) {
+                if (!outbound || typeof outbound !== 'object') continue;
+
+                const protocol = outbound.protocol;
+                const settings = outbound.settings;
+
+                if (!settings || typeof settings !== 'object') continue;
+
+                if (protocol === 'vless') {
+                    const vnext = settings.vnext;
+                    if (Array.isArray(vnext)) {
+                        for (const vn of vnext) {
+                            const users = vn?.users;
+                            if (Array.isArray(users)) {
+                                for (const user of users) {
+                                    if (user && typeof user === 'object') {
+                                        user.id = creds.vlessUuid;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (protocol === 'shadowsocks') {
+                    const servers = settings.servers;
+                    if (Array.isArray(servers)) {
+                        for (const srv of servers) {
+                            if (srv && typeof srv === 'object') {
+                                srv.password = creds.ssPassword;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return clone;
     }
 
     private async decodeMarzbanLink(shortUuid: string): Promise<{

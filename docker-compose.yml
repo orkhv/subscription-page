@@ -1,5 +1,5 @@
 services:
-  remnawave-subscription-page:
+  orkhv-subscription-page:
     build:
       context: .
       dockerfile: Dockerfile

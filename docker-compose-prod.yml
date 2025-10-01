@@ -1,8 +1,8 @@
 services:
-  remnawave-subscription-page:
-    image: remnawave/subscription-page:latest
-    container_name: remnawave-subscription-page
-    hostname: remnawave-subscription-page
+  orkhv-subscription-page:
+    image: orkhv/subscription-page:latest
+    container_name: orkhv-subscription-page
+    hostname: orkhv-subscription-page
     restart: always
     env_file:
       - .env
