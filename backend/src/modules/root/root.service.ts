@@ -4,7 +4,6 @@ import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { promises as fs } from 'node:fs';
-import * as path from 'node:path';
 
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
@@ -319,7 +318,11 @@ export class RootService {
                 }
             } catch (err) {
                 this.logger.error(`Failed to check default.json mtime: ${err}`);
-                return this.defaultJsonCache;
+                // Возвращаем кэш, но не null - используем существующий кэш или выбрасываем ошибку
+                if (this.defaultJsonCache) {
+                    return this.defaultJsonCache;
+                }
+                throw err;
             }
         }
 
