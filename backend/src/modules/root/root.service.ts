@@ -305,24 +305,22 @@ export class RootService {
 
     private async loadDefaultJsonArray(): Promise<any[]> {
         const filePath = '/backend/default.json';
-        let needReload = false;
-
-        // Проверяем mtime при каждом запросе, если кэш уже есть
+        
+        // Если кэш есть, проверяем изменился ли файл
         if (this.defaultJsonCache) {
             try {
                 const stats = await fs.stat(filePath);
                 if (stats.mtimeMs > this.defaultJsonMtime) {
-                    this.logger.log('[Template] default.json file modified, reloading...');
-                    needReload = true;
+                    this.logger.log('[Template] default.json file modified, clearing cache');
+                    this.defaultJsonCache = null;
+                } else {
+                    this.logger.debug('[Template] Using cached default.json');
+                    return this.defaultJsonCache;
                 }
             } catch (err) {
                 this.logger.error(`Failed to check default.json mtime: ${err}`);
+                return this.defaultJsonCache;
             }
-        }
-
-        if (this.defaultJsonCache && !needReload) {
-            this.logger.debug('[Template] Using cached default.json');
-            return this.defaultJsonCache;
         }
 
         // Если загрузка уже началась другим запросом, ждём её
