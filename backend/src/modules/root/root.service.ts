@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
@@ -22,6 +23,8 @@ export class RootService {
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKey?: string;
     private defaultJsonCache: any[] | null = null;
+    private loadDefaultJsonPromise: Promise<any[]> | null = null;
+    private defaultJsonMtime: number = 0;
 
     constructor(
         private readonly configService: ConfigService,
@@ -80,7 +83,7 @@ export class RootService {
 
             // Обработка специальных клиентов (приложений): Happ, Streisand, v2rayng, v2box
             if (userAgent && this.isClientApp(userAgent)) {
-                this.logger.log(
+                this.logger.debug(
                     `[ClientApp] UA matched, returning JSON from template. ua=${userAgent}, shortUuid=${shortUuidLocal}`,
                 );
                 return this.returnClientAppJson(clientIp, req, res, shortUuidLocal);
@@ -227,7 +230,9 @@ export class RootService {
             );
 
             if (!rawResponse || !rawResponse.response) {
-                this.logger.error(`GetSubscriptionRawWithDisabledHosts failed, shortUuid: ${shortUuid}`);
+                this.logger.error(
+                    `GetSubscriptionRawWithDisabledHosts failed, shortUuid: ${shortUuid}, hasHeaders: ${!!rawResponse?.headers}`,
+                );
                 res.socket?.destroy();
                 return;
             }
@@ -289,11 +294,6 @@ export class RootService {
                     });
             }
 
-            const stats = this.computeTransformStats(transformed, vlessUuid, ssPassword, username);
-            this.logger.log(
-                `[ClientApp] Transformed template: vlessUsersUpdated=${stats.vlessUsersUpdated}, ssServersUpdated=${stats.ssServersUpdated}, remarksIdUpdated=${stats.remarksIdUpdated}`,
-            );
-
             this.logger.debug('[ClientApp] Sending transformed JSON response');
             res.status(200).json(transformed);
         } catch (error) {
@@ -304,11 +304,46 @@ export class RootService {
     }
 
     private async loadDefaultJsonArray(): Promise<any[]> {
+        const filePath = '/backend/default.json';
+        let needReload = false;
+
+        // Проверяем mtime при каждом запросе, если кэш уже есть
         if (this.defaultJsonCache) {
+            try {
+                const stats = await fs.stat(filePath);
+                if (stats.mtimeMs > this.defaultJsonMtime) {
+                    this.logger.log('[Template] default.json file modified, reloading...');
+                    needReload = true;
+                }
+            } catch (err) {
+                this.logger.error(`Failed to check default.json mtime: ${err}`);
+            }
+        }
+
+        if (this.defaultJsonCache && !needReload) {
             this.logger.debug('[Template] Using cached default.json');
             return this.defaultJsonCache;
         }
 
+        // Если загрузка уже началась другим запросом, ждём её
+        if (this.loadDefaultJsonPromise) {
+            this.logger.debug('[Template] Waiting for ongoing load');
+            return this.loadDefaultJsonPromise;
+        }
+
+        // Начинаем загрузку и сохраняем промис, чтобы другие запросы ждали
+        this.loadDefaultJsonPromise = this.doLoadDefaultJsonArray();
+
+        try {
+            const result = await this.loadDefaultJsonPromise;
+            return result;
+        } finally {
+            // Очищаем промис после завершения (успех или ошибка)
+            this.loadDefaultJsonPromise = null;
+        }
+    }
+
+    private async doLoadDefaultJsonArray(): Promise<any[]> {
         // Жёсткий путь внутри образа/контейнера
         const filePath = '/backend/default.json';
         const content = await fs.readFile(filePath, 'utf-8');
@@ -319,6 +354,15 @@ export class RootService {
         }
 
         this.defaultJsonCache = parsed;
+        
+        // Сохраняем mtime для проверки изменений
+        try {
+            const stats = await fs.stat(filePath);
+            this.defaultJsonMtime = stats.mtimeMs;
+        } catch (err) {
+            this.logger.error(`Failed to get default.json mtime: ${err}`);
+        }
+        
         this.logger.log(`[Template] Loaded /backend/default.json profiles=${parsed.length}`);
         return this.defaultJsonCache;
     }
@@ -387,65 +431,6 @@ export class RootService {
         return `${value.slice(0, 4)}…${value.slice(-4)}`;
     }
 
-    private computeTransformStats(
-        profiles: any[],
-        vlessUuid: string,
-        ssPassword: string,
-        username: string,
-    ): { vlessUsersUpdated: number; ssServersUpdated: number; remarksIdUpdated: number } {
-        let vlessUsersUpdated = 0;
-        let ssServersUpdated = 0;
-        let remarksIdUpdated = 0;
-
-        for (const profile of profiles) {
-            if (typeof profile?.remarks === 'string') {
-                if (profile.remarks === `ID: ${username}`) remarksIdUpdated += 1;
-            }
-            const outbounds = profile?.outbounds;
-            if (!Array.isArray(outbounds)) continue;
-
-            for (const outbound of outbounds) {
-                if (!outbound || typeof outbound !== 'object') continue;
-                const protocol = outbound.protocol;
-                const settings = outbound.settings;
-                if (!settings || typeof settings !== 'object') continue;
-
-                if (protocol === 'vless') {
-                    const vnext = settings.vnext;
-                    if (Array.isArray(vnext)) {
-                        for (const vn of vnext) {
-                            const users = vn?.users;
-                            if (Array.isArray(users)) {
-                                for (const user of users) {
-                                    if (user && typeof user === 'object' && user.id === vlessUuid) {
-                                        vlessUsersUpdated += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (protocol === 'shadowsocks') {
-                    const servers = settings.servers;
-                    if (Array.isArray(servers)) {
-                        for (const srv of servers) {
-                            if (
-                                srv &&
-                                typeof srv === 'object' &&
-                                typeof srv.password === 'string' &&
-                                srv.password === ssPassword
-                            ) {
-                                ssServersUpdated += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return { vlessUsersUpdated, ssServersUpdated, remarksIdUpdated };
-    }
 
     private async decodeMarzbanLink(shortUuid: string): Promise<{
         username: string;
