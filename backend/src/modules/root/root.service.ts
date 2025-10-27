@@ -313,8 +313,11 @@ export class RootService {
                     this.logger.log('[Template] default.json file modified, clearing cache');
                     this.defaultJsonCache = null;
                 } else {
-                    this.logger.debug('[Template] Using cached default.json');
-                    return this.defaultJsonCache;
+                    // Проверяем кэш еще раз перед возвратом, чтобы избежать race condition
+                    if (this.defaultJsonCache) {
+                        this.logger.debug('[Template] Using cached default.json');
+                        return this.defaultJsonCache;
+                    }
                 }
             } catch (err) {
                 this.logger.error(`Failed to check default.json mtime: ${err}`);
