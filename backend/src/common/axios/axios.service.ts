@@ -182,6 +182,35 @@ export class AxiosService implements OnModuleInit {
         }
     }
 
+    public async getUserByShortUuid(
+        clientIp: string,
+        shortUuid: string,
+    ): Promise<ICommandResponse<GetSubscriptionInfoByShortUuidCommand.Response>> {
+        try {
+            const response =
+                await this.axiosInstance.request<GetSubscriptionInfoByShortUuidCommand.Response>({
+                    method: 'GET',
+                    url: `api/users/by-short-uuid/${shortUuid}`,
+                    headers: {
+                        [REMNAWAVE_REAL_IP_HEADER]: clientIp,
+                    },
+                });
+
+            return {
+                isOk: true,
+                response: response.data,
+            };
+        } catch (error) {
+            if (error instanceof AxiosError) {
+                this.logger.error('Error in getUserByShortUuid Request:', (error as AxiosError).message);
+            } else {
+                this.logger.error('Error in getUserByShortUuid Request:', error);
+            }
+
+            return { isOk: false };
+        }
+    }
+
     public async getSubscription(
         clientIp: string,
         shortUuid: string,
@@ -214,7 +243,7 @@ export class AxiosService implements OnModuleInit {
             };
         } catch (error) {
             if (error instanceof AxiosError) {
-                this.logger.error('Error in GetSubscription Request:', error.message);
+                this.logger.error('Error in GetSubscription Request:', (error as AxiosError).message);
             } else {
                 this.logger.error('Error in GetSubscription Request:', error);
             }
