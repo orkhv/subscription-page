@@ -294,7 +294,19 @@ export class AxiosService implements OnModuleInit {
         ];
 
         const filteredHeaders = Object.fromEntries(
-            Object.entries(headers).filter(([key]) => allowedHeaders.includes(key)),
+            Object.entries(headers)
+                .filter(([key]) => {
+                    const lowerKey = key.toLowerCase();
+                    // Исключаем заголовки кэширования, чтобы панель не возвращала 304
+                    if (
+                        lowerKey === 'if-none-match' ||
+                        lowerKey === 'if-modified-since' ||
+                        lowerKey === 'cache-control'
+                    ) {
+                        return false;
+                    }
+                    return allowedHeaders.includes(lowerKey);
+                }),
         );
 
         return filteredHeaders;

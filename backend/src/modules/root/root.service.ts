@@ -102,63 +102,96 @@ export class RootService {
                 return;
             }
 
-            // Получаем данные пользователя для подстановки ssPassword и vlessUuid
-            let userInfo;
-            try {
-                userInfo = await this.axiosService.getUserByShortUuid(
-                    clientIp,
-                    shortUuidLocal,
-                );
-            } catch (error) {
-                this.logger.warn(
-                    `Failed to get user info for shortUuid: ${shortUuidLocal}, continuing without credential substitution`,
-                    error,
-                );
-                userInfo = { isOk: false };
-            }
-
             let responseData = subscriptionDataResponse.response;
 
-            // Если получили данные пользователя и response является массивом (конфигурация xray)
-            if (
-                userInfo.isOk &&
-                userInfo.response &&
-                userInfo.response.response &&
-                Array.isArray(responseData)
-            ) {
+            // Если response является массивом (конфигурация xray), обязательно нужны пароли
+            if (Array.isArray(responseData)) {
+                // Получаем данные пользователя для подстановки ssPassword и vlessUuid
+                let userInfo: Awaited<
+                    ReturnType<typeof this.axiosService.getUserByShortUuid>
+                >;
+                try {
+                    userInfo = await this.axiosService.getUserByShortUuid(
+                        clientIp,
+                        shortUuidLocal,
+                    );
+                } catch (error) {
+                    this.logger.error(
+                        `Failed to get user info for shortUuid: ${shortUuidLocal}, cannot proceed without credentials`,
+                        error,
+                    );
+                    res.socket?.destroy();
+                    return;
+                }
+
+                // Проверяем, что получили данные пользователя
+                if (
+                    !userInfo.isOk ||
+                    !userInfo.response ||
+                    typeof userInfo.response !== 'object' ||
+                    !userInfo.response.response ||
+                    typeof userInfo.response.response !== 'object'
+                ) {
+                    this.logger.error(
+                        `Failed to get user info for shortUuid: ${shortUuidLocal}, userInfo.isOk: ${userInfo.isOk}`,
+                    );
+                    res.socket?.destroy();
+                    return;
+                }
+
                 const ssPassword = userInfo.response.response.ssPassword;
                 const vlessUuid = userInfo.response.response.vlessUuid;
 
                 // Проверяем, что ssPassword и vlessUuid существуют и являются строками
                 if (
-                    typeof ssPassword === 'string' &&
-                    ssPassword.length > 0 &&
-                    typeof vlessUuid === 'string' &&
-                    vlessUuid.length > 0
+                    typeof ssPassword !== 'string' ||
+                    ssPassword.length === 0 ||
+                    typeof vlessUuid !== 'string' ||
+                    vlessUuid.length === 0
                 ) {
-                    responseData = this.fillEmptyCredentials(responseData, ssPassword, vlessUuid);
-                } else {
-                    this.logger.warn(
+                    this.logger.error(
                         `Invalid ssPassword or vlessUuid for shortUuid: ${shortUuidLocal}. ssPassword: ${typeof ssPassword}, vlessUuid: ${typeof vlessUuid}`,
                     );
+                    res.socket?.destroy();
+                    return;
                 }
-            } else if (Array.isArray(responseData)) {
-                // Логируем, если не удалось получить данные пользователя, но конфигурация является массивом
-                this.logger.debug(
-                    `Skipping credential substitution for shortUuid: ${shortUuidLocal}. userInfo.isOk: ${userInfo.isOk}`,
-                );
+
+                // Подставляем пароли в конфигурацию
+                try {
+                    responseData = this.fillEmptyCredentials(responseData, ssPassword, vlessUuid);
+                } catch (error) {
+                    this.logger.error(
+                        `Failed to fill credentials for shortUuid: ${shortUuidLocal}`,
+                        error,
+                    );
+                    res.socket?.destroy();
+                    return;
+                }
             }
 
             if (subscriptionDataResponse.headers) {
                 Object.entries(subscriptionDataResponse.headers)
                     .filter(([key]) => {
-                        const ignoredHeaders = ['transfer-encoding', 'content-length', 'server'];
+                        const ignoredHeaders = [
+                            'transfer-encoding',
+                            'content-length',
+                            'server',
+                            'etag',
+                            'last-modified',
+                            'cache-control',
+                            'expires',
+                        ];
                         return !ignoredHeaders.includes(key.toLowerCase());
                     })
                     .forEach(([key, value]) => {
                         res.setHeader(key, value);
                     });
             }
+
+            // Отключаем кэширование для подписок, чтобы всегда возвращать 200
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
 
             res.status(200).send(responseData);
         } catch (error) {
