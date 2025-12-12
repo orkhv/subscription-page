@@ -107,6 +107,7 @@ export class RootService {
                 clientIp,
                 shortUuidLocal,
             );
+            this.logger.log(`userDataResponse: ${JSON.stringify(userDataResponse)}`);
 
             if (!userDataResponse.isOk || !userDataResponse.response) {
                 this.logger.error(`Failed to get user credentials for shortUuid: ${shortUuidLocal}`);
@@ -114,8 +115,8 @@ export class RootService {
                 return;
             }
 
-            const response = userDataResponse.response as Record<string, unknown>;
             const ssPassword = (response?.ssPassword as string) || '';
+            const response = userDataResponse.response as Record<string, unknown>;
             const vlessUuid = (response?.vlessUuid as string) || '';
 
             // Inject credentials into config if we have them (only for JSON, not for base64)
