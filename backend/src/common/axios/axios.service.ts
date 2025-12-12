@@ -185,16 +185,36 @@ export class AxiosService implements OnModuleInit {
     public async getUserByShortUuid(
         clientIp: string,
         shortUuid: string,
-    ): Promise<ICommandResponse<GetSubscriptionInfoByShortUuidCommand.Response>> {
+        authToken?: string,
+    ): Promise<
+        ICommandResponse<{
+            response: {
+                ssPassword: string;
+                vlessUuid: string;
+                [key: string]: unknown;
+            };
+        }>
+    > {
         try {
-            const response =
-                await this.axiosInstance.request<GetSubscriptionInfoByShortUuidCommand.Response>({
-                    method: 'GET',
-                    url: `api/users/by-short-uuid/${shortUuid}`,
-                    headers: {
-                        [REMNAWAVE_REAL_IP_HEADER]: clientIp,
-                    },
-                });
+            const headers: Record<string, string> = {
+                [REMNAWAVE_REAL_IP_HEADER]: clientIp,
+            };
+
+            if (authToken) {
+                headers['Authorization'] = authToken;
+            }
+
+            const response = await this.axiosInstance.request<{
+                response: {
+                    ssPassword: string;
+                    vlessUuid: string;
+                    [key: string]: unknown;
+                };
+            }>({
+                method: 'GET',
+                url: `api/users/by-short-uuid/${shortUuid}`,
+                headers,
+            });
 
             return {
                 isOk: true,
@@ -202,12 +222,18 @@ export class AxiosService implements OnModuleInit {
             };
         } catch (error) {
             if (error instanceof AxiosError) {
-                this.logger.error('Error in getUserByShortUuid Request:', (error as AxiosError).message);
-            } else {
-                this.logger.error('Error in getUserByShortUuid Request:', error);
-            }
+                this.logger.error('Error in GetUserByShortUuid Request:', error.message);
 
-            return { isOk: false };
+                return {
+                    isOk: false,
+                };
+            } else {
+                this.logger.error('Error in GetUserByShortUuid Request:', error);
+
+                return {
+                    isOk: false,
+                };
+            }
         }
     }
 
@@ -243,7 +269,7 @@ export class AxiosService implements OnModuleInit {
             };
         } catch (error) {
             if (error instanceof AxiosError) {
-                this.logger.error('Error in GetSubscription Request:', (error as AxiosError).message);
+                this.logger.error('Error in GetSubscription Request:', error.message);
             } else {
                 this.logger.error('Error in GetSubscription Request:', error);
             }

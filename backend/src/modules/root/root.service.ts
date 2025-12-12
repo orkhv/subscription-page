@@ -102,37 +102,52 @@ export class RootService {
                 return;
             }
 
-            // Get user data for credential injection (only if we got the config)
-            const userDataResponse = await this.axiosService.getUserByShortUuid(
-                clientIp,
-                shortUuidLocal,
-            );
-            this.logger.log(`userDataResponse: ${JSON.stringify(userDataResponse)}`);
-
-            if (!userDataResponse.isOk || !userDataResponse.response) {
-                this.logger.error(`Failed to get user credentials for shortUuid: ${shortUuidLocal}`);
-                res.socket?.destroy();
-                return;
+            // Получаем данные пользователя для подстановки ssPassword и vlessUuid
+            let userInfo;
+            try {
+                userInfo = await this.axiosService.getUserByShortUuid(
+                    clientIp,
+                    shortUuidLocal,
+                );
+            } catch (error) {
+                this.logger.warn(
+                    `Failed to get user info for shortUuid: ${shortUuidLocal}, continuing without credential substitution`,
+                    error,
+                );
+                userInfo = { isOk: false };
             }
 
-            const ssPassword = (response?.ssPassword as string) || '';
-            const response = userDataResponse.response as Record<string, unknown>;
-            const vlessUuid = (response?.vlessUuid as string) || '';
-
-            // Inject credentials into config if we have them (only for JSON, not for base64)
             let responseData = subscriptionDataResponse.response;
-            if ((ssPassword || vlessUuid) && typeof responseData !== 'string') {
-                this.logger.log(`Injecting credentials into config for shortUuid: ${shortUuidLocal}`);
-                responseData = this.injectCredentialsIntoConfig(
-                    subscriptionDataResponse.response,
-                    ssPassword,
-                    vlessUuid,
+
+            // Если получили данные пользователя и response является массивом (конфигурация xray)
+            if (
+                userInfo.isOk &&
+                userInfo.response &&
+                userInfo.response.response &&
+                Array.isArray(responseData)
+            ) {
+                const ssPassword = userInfo.response.response.ssPassword;
+                const vlessUuid = userInfo.response.response.vlessUuid;
+
+                // Проверяем, что ssPassword и vlessUuid существуют и являются строками
+                if (
+                    typeof ssPassword === 'string' &&
+                    ssPassword.length > 0 &&
+                    typeof vlessUuid === 'string' &&
+                    vlessUuid.length > 0
+                ) {
+                    responseData = this.fillEmptyCredentials(responseData, ssPassword, vlessUuid);
+                } else {
+                    this.logger.warn(
+                        `Invalid ssPassword or vlessUuid for shortUuid: ${shortUuidLocal}. ssPassword: ${typeof ssPassword}, vlessUuid: ${typeof vlessUuid}`,
+                    );
+                }
+            } else if (Array.isArray(responseData)) {
+                // Логируем, если не удалось получить данные пользователя, но конфигурация является массивом
+                this.logger.debug(
+                    `Skipping credential substitution for shortUuid: ${shortUuidLocal}. userInfo.isOk: ${userInfo.isOk}`,
                 );
             }
-
-            this.logger.log(`responseData type: ${typeof responseData}, isArray: ${Array.isArray(responseData)}`);
-            this.logger.log(`ssPassword: "${ssPassword}", vlessUuid: "${vlessUuid}"`);
-            this.logger.log(`responseData: ${JSON.stringify(responseData).slice(0, 500)}`);
 
             if (subscriptionDataResponse.headers) {
                 Object.entries(subscriptionDataResponse.headers)
@@ -341,6 +356,163 @@ export class RootService {
         };
     }
 
+    private fillEmptyCredentials(
+        configArray: unknown[],
+        ssPassword: string,
+        vlessUuid: string,
+    ): unknown[] {
+        return configArray.map((config) => {
+            if (typeof config !== 'object' || config === null) {
+                return config;
+            }
+
+            const configObj = config as Record<string, unknown>;
+
+            if (!configObj.outbounds || !Array.isArray(configObj.outbounds)) {
+                return config;
+            }
+
+            const modifiedConfig = { ...configObj };
+            modifiedConfig.outbounds = configObj.outbounds.map((outbound: unknown) => {
+                if (typeof outbound !== 'object' || outbound === null) {
+                    return outbound;
+                }
+
+                const outboundObj = outbound as Record<string, unknown>;
+                let modifiedOutbound: Record<string, unknown> | null = null;
+
+                // Обработка shadowsocks
+                if (outboundObj.protocol === 'shadowsocks' && outboundObj.settings) {
+                    const settings = outboundObj.settings as Record<string, unknown>;
+                    if (typeof settings === 'object' && settings !== null && Array.isArray(settings.servers)) {
+                        const hasEmptyPassword = settings.servers.some((server: unknown) => {
+                            if (typeof server !== 'object' || server === null) {
+                                return false;
+                            }
+                            const serverObj = server as Record<string, unknown>;
+                            const password = serverObj.password;
+                            return (
+                                password === '' ||
+                                password === ' ' ||
+                                password === null ||
+                                password === undefined
+                            );
+                        });
+
+                        if (hasEmptyPassword) {
+                            modifiedOutbound = { ...outboundObj };
+                            modifiedOutbound.settings = {
+                                ...settings,
+                                servers: settings.servers.map((server: unknown) => {
+                                    if (typeof server !== 'object' || server === null) {
+                                        return server;
+                                    }
+
+                                    const serverObj = server as Record<string, unknown>;
+                                    const password = serverObj.password;
+
+                                    // Проверяем, пустой ли password ("" или " ")
+                                    if (
+                                        password === '' ||
+                                        password === ' ' ||
+                                        password === null ||
+                                        password === undefined
+                                    ) {
+                                        return {
+                                            ...serverObj,
+                                            password: ssPassword,
+                                        };
+                                    }
+
+                                    return { ...serverObj };
+                                }),
+                            };
+                        }
+                    }
+                }
+
+                // Обработка vless
+                if (outboundObj.protocol === 'vless' && outboundObj.settings) {
+                    const settings = outboundObj.settings as Record<string, unknown>;
+                    if (typeof settings === 'object' && settings !== null && Array.isArray(settings.vnext)) {
+                        const hasEmptyId = settings.vnext.some((vnextItem: unknown) => {
+                            if (typeof vnextItem !== 'object' || vnextItem === null) {
+                                return false;
+                            }
+                            const vnextObj = vnextItem as Record<string, unknown>;
+                            if (!Array.isArray(vnextObj.users)) {
+                                return false;
+                            }
+                            return vnextObj.users.some((user: unknown) => {
+                                if (typeof user !== 'object' || user === null) {
+                                    return false;
+                                }
+                                const userObj = user as Record<string, unknown>;
+                                const id = userObj.id;
+                                return (
+                                    id === '' ||
+                                    id === ' ' ||
+                                    id === null ||
+                                    id === undefined
+                                );
+                            });
+                        });
+
+                        if (hasEmptyId) {
+                            if (!modifiedOutbound) {
+                                modifiedOutbound = { ...outboundObj };
+                            }
+                            modifiedOutbound.settings = {
+                                ...settings,
+                                vnext: settings.vnext.map((vnextItem: unknown) => {
+                                    if (typeof vnextItem !== 'object' || vnextItem === null) {
+                                        return vnextItem;
+                                    }
+
+                                    const vnextObj = vnextItem as Record<string, unknown>;
+                                    if (Array.isArray(vnextObj.users)) {
+                                        return {
+                                            ...vnextObj,
+                                            users: vnextObj.users.map((user: unknown) => {
+                                                if (typeof user !== 'object' || user === null) {
+                                                    return user;
+                                                }
+
+                                                const userObj = user as Record<string, unknown>;
+                                                const id = userObj.id;
+
+                                                // Проверяем, пустой ли id ("" или " ")
+                                                if (
+                                                    id === '' ||
+                                                    id === ' ' ||
+                                                    id === null ||
+                                                    id === undefined
+                                                ) {
+                                                    return {
+                                                        ...userObj,
+                                                        id: vlessUuid,
+                                                    };
+                                                }
+
+                                                return { ...userObj };
+                                            }),
+                                        };
+                                    }
+
+                                    return { ...vnextObj };
+                                }),
+                            };
+                        }
+                    }
+                }
+
+                return modifiedOutbound || { ...outboundObj };
+            });
+
+            return modifiedConfig;
+        });
+    }
+
     private checkSubscriptionValidity(createdAt: Date, username: string): boolean {
         const validFrom = this.configService.get<string | undefined>(
             'MARZBAN_LEGACY_SUBSCRIPTION_VALID_FROM',
@@ -364,117 +536,5 @@ export class RootService {
         }
 
         return true;
-    }
-
-    private injectCredentialsIntoConfig(
-        config: unknown,
-        ssPassword: string,
-        vlessUuid: string,
-    ): unknown {
-        if (!Array.isArray(config)) {
-            return config;
-        }
-
-        return config.map((configObj) => {
-            if (typeof configObj !== 'object' || configObj === null) {
-                return configObj;
-            }
-
-            const result = { ...configObj } as Record<string, unknown>;
-
-            // Process outbounds
-            if (Array.isArray(result.outbounds)) {
-                result.outbounds = result.outbounds.map((outbound: unknown) => {
-                    if (typeof outbound !== 'object' || outbound === null) {
-                        return outbound;
-                    }
-
-                    const outboundCopy = { ...outbound } as Record<string, unknown>;
-
-                    // Handle Shadowsocks
-                    if (
-                        (outbound as Record<string, unknown>).protocol === 'shadowsocks' &&
-                        (outbound as Record<string, unknown>).settings
-                    ) {
-                        const settings = (outbound as Record<string, unknown>)
-                            .settings as Record<string, unknown>;
-                        if (Array.isArray(settings.servers)) {
-                            outboundCopy.settings = {
-                                ...settings,
-                                servers: settings.servers.map((server: unknown) => {
-                                    if (typeof server !== 'object' || server === null) {
-                                        return server;
-                                    }
-
-                                    const serverCopy = { ...server } as Record<string, unknown>;
-
-                                    // Check if password is empty (empty string or just whitespace)
-                                    if (
-                                        serverCopy.password === '' ||
-                                        (typeof serverCopy.password === 'string' &&
-                                            serverCopy.password.trim() === '')
-                                    ) {
-                                        serverCopy.password = ssPassword;
-                                    }
-
-                                    return serverCopy;
-                                }),
-                            };
-                        }
-                    }
-
-                    // Handle VLESS
-                    if (
-                        (outbound as Record<string, unknown>).protocol === 'vless' &&
-                        (outbound as Record<string, unknown>).settings
-                    ) {
-                        const settings = (outbound as Record<string, unknown>)
-                            .settings as Record<string, unknown>;
-                        if (Array.isArray(settings.vnext)) {
-                            outboundCopy.settings = {
-                                ...settings,
-                                vnext: settings.vnext.map((vnext: unknown) => {
-                                    if (typeof vnext !== 'object' || vnext === null) {
-                                        return vnext;
-                                    }
-
-                                    const vnextCopy = {
-                                        ...vnext,
-                                    } as Record<string, unknown>;
-                                    const vnextObj = vnext as Record<string, unknown>;
-
-                                    if (Array.isArray(vnextObj.users)) {
-                                        vnextCopy.users = vnextObj.users.map((user: unknown) => {
-                                            if (typeof user !== 'object' || user === null) {
-                                                return user;
-                                            }
-
-                                            const userCopy = { ...user } as Record<string, unknown>;
-
-                                            // Check if id is empty (empty string or just whitespace)
-                                            if (
-                                                userCopy.id === '' ||
-                                                (typeof userCopy.id === 'string' &&
-                                                    userCopy.id.trim() === '')
-                                            ) {
-                                                userCopy.id = vlessUuid;
-                                            }
-
-                                            return userCopy;
-                                        });
-                                    }
-
-                                    return vnextCopy;
-                                }),
-                            };
-                        }
-                    }
-
-                    return outboundCopy;
-                });
-            }
-
-            return result;
-        });
     }
 }
