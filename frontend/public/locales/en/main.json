@@ -12,32 +12,8 @@
             "add-subscription-button": "Add subscription",
             "connect-and-use": "Connect and use",
             "installation": "Installation",
-            "select-device": "Select device"
-        },
-        "ios": {
-            "widget": {
-                "install-and-open-app": "Install and open {{appName}}"
-            }
-        },
-        "android": {
-            "widget": {
-                "install-and-open-app": "Install and open {{appName}}"
-            }
-        },
-        "windows": {
-            "widget": {
-                "download-app": "Download {{appName}}"
-            }
-        },
-        "linux": {
-            "widget": {
-                "download-app": "Download {{appName}}"
-            }
-        },
-        "macos": {
-            "widget": {
-                "download-app": "Download {{appName}}"
-            }
+            "select-device": "Select device",
+            "install-app": "Install app"
         }
     },
     "subscription-link": {
@@ -59,6 +35,13 @@
             "expires": "Expires",
             "at": "At",
             "bandwidth": "Bandwidth"
+        }
+    },
+    "raw-keys": {
+        "widget": {
+            "title": "Connection Keys",
+            "keys-count": "keys",
+            "scan-to-import": "Scan to import this key"
         }
     },
     "get-expiration-text": {
