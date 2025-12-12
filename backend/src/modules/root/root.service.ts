@@ -114,8 +114,9 @@ export class RootService {
                 return;
             }
 
-            const ssPassword = userDataResponse.response.ssPassword || '';
-            const vlessUuid = userDataResponse.response.vlessUuid || '';
+            const response = userDataResponse.response as Record<string, unknown>;
+            const ssPassword = (response?.ssPassword as string) || '';
+            const vlessUuid = (response?.vlessUuid as string) || '';
 
             // Inject credentials into config if we have them (only for JSON, not for base64)
             let responseData = subscriptionDataResponse.response;
