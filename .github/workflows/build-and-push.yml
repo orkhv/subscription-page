@@ -47,6 +47,20 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.TOKEN_GH_DEPLOY }}
 
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            orkhv/subscription-page
+            ghcr.io/orkhv/subscription-page
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -54,8 +68,5 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64, linux/arm64
           push: true
-          tags: |
-            orkhv/subscription-page:latest
-            orkhv/subscription-page:${{github.ref_name}}
-            ghcr.io/orkhv/subscription-page:latest
-            ghcr.io/orkhv/subscription-page:${{github.ref_name}}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
