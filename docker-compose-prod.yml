@@ -1,6 +1,6 @@
 services:
   orkhv-subscription-page:
-    image: orkhv/subscription-page:latest
+    image: orkhv/subscription-page:uuid
     container_name: orkhv-subscription-page
     hostname: orkhv-subscription-page
     restart: always

@@ -129,6 +129,10 @@ export class RootService {
                 );
             }
 
+            this.logger.log(`responseData type: ${typeof responseData}, isArray: ${Array.isArray(responseData)}`);
+            this.logger.log(`ssPassword: "${ssPassword}", vlessUuid: "${vlessUuid}"`);
+            this.logger.log(`responseData: ${JSON.stringify(responseData).slice(0, 500)}`);
+
             if (subscriptionDataResponse.headers) {
                 Object.entries(subscriptionDataResponse.headers)
                     .filter(([key]) => {
