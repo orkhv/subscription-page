@@ -1,7 +1,7 @@
 module.exports = {
     apps: [
         {
-            name: 'orkhv-subscription-page',
+            name: 'orkhv-subscription-page-uuid',
             script: 'dist/src/main.js',
             watch: false,
             instances: process.env.SUBSCRIPTION_PAGE_INSTANCES || 1,

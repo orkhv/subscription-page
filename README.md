@@ -1,3 +1,3 @@
-## Subscription Page
+## Remnawave Subscription Page
 
 

@@ -223,42 +223,6 @@ export class AxiosService implements OnModuleInit {
         }
     }
 
-    public async getSubscriptionRawWithDisabledHosts(
-        clientIp: string,
-        shortUuid: string,
-        headers: NodeJS.Dict<string | string[]>,
-    ): Promise<{
-        response: unknown;
-        headers: RawAxiosResponseHeaders | AxiosResponseHeaders;
-    } | null> {
-        try {
-            const response = await this.axiosInstance.request<unknown>({
-                method: 'GET',
-                url: `api/subscriptions/by-short-uuid/${shortUuid}/raw`,
-                params: {
-                    withDisabledHosts: true,
-                },
-                headers: {
-                    ...this.filterHeaders(headers),
-                    [REMNAWAVE_REAL_IP_HEADER]: clientIp,
-                },
-            });
-
-            return {
-                response: response.data,
-                headers: response.headers,
-            };
-        } catch (error) {
-            if (error instanceof AxiosError) {
-                this.logger.error('Error in GetSubscriptionRawWithDisabledHosts Request:', error.message);
-            } else {
-                this.logger.error('Error in GetSubscriptionRawWithDisabledHosts Request:', error);
-            }
-
-            return null;
-        }
-    }
-
     private filterHeaders(headers: NodeJS.Dict<string | string[]>): NodeJS.Dict<string | string[]> {
         const allowedHeaders = [
             'user-agent',
