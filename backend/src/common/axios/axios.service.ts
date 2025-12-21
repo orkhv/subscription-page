@@ -239,6 +239,31 @@ export class AxiosService implements OnModuleInit {
             return { isOk: false };
         }
     }
+
+    public async getSubpageConfig(
+        shortUuid: string,
+        requestHeaders: IncomingHttpHeaders,
+    ): Promise<ICommandResponse<GetSubpageConfigByShortUuidCommand.Response['response']>> {
+        try {
+            const response =
+                await this.axiosInstance.request<GetSubpageConfigByShortUuidCommand.Response>({
+                    method: GetSubpageConfigByShortUuidCommand.endpointDetails.REQUEST_METHOD,
+                    url: GetSubpageConfigByShortUuidCommand.url(shortUuid),
+                    data: {
+                        requestHeaders,
+                    },
+                });
+
+            return {
+                isOk: true,
+                response: response.data.response,
+            };
+        } catch (error) {
+            this.logger.error('Error in GetSubpageConfig Request:', error);
+            return { isOk: false };
+        }
+    }
+
     public async getUserByShortUuid(
         clientIp: string,
         shortUuid: string,
@@ -291,27 +316,6 @@ export class AxiosService implements OnModuleInit {
                     isOk: false,
                 };
             }
-    public async getSubpageConfig(
-        shortUuid: string,
-        requestHeaders: IncomingHttpHeaders,
-    ): Promise<ICommandResponse<GetSubpageConfigByShortUuidCommand.Response['response']>> {
-        try {
-            const response =
-                await this.axiosInstance.request<GetSubpageConfigByShortUuidCommand.Response>({
-                    method: GetSubpageConfigByShortUuidCommand.endpointDetails.REQUEST_METHOD,
-                    url: GetSubpageConfigByShortUuidCommand.url(shortUuid),
-                    data: {
-                        requestHeaders,
-                    },
-                });
-
-            return {
-                isOk: true,
-                response: response.data.response,
-            };
-        } catch (error) {
-            this.logger.error('Error in GetSubpageConfig Request:', error);
-            return { isOk: false };
         }
     }
 
