@@ -14,26 +14,25 @@ import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 import { AxiosService } from '@common/axios/axios.service';
 import { sanitizeUsername } from '@common/utils';
 
+import { SubpageConfigService } from './subpage-config.service';
+
 @Injectable()
 export class RootService {
     private readonly logger = new Logger(RootService.name);
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKey?: string;
-    private readonly subscriptionUiDisplayRawKeys: boolean;
 
     constructor(
         private readonly configService: ConfigService,
         private readonly jwtService: JwtService,
         private readonly axiosService: AxiosService,
+        private readonly subpageConfigService: SubpageConfigService,
     ) {
         this.isMarzbanLegacyLinkEnabled = this.configService.getOrThrow<boolean>(
             'MARZBAN_LEGACY_LINK_ENABLED',
         );
         this.marzbanSecretKey = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
-        this.subscriptionUiDisplayRawKeys = this.configService.getOrThrow<boolean>(
-            'SUBSCRIPTION_UI_DISPLAY_RAW_KEYS',
-        );
     }
 
     public async serveSubscriptionPage(
@@ -202,13 +201,14 @@ export class RootService {
         }
     }
 
-    private async generateJwtForCookie(): Promise<string> {
+    private generateJwtForCookie(uuid: string | null): string {
         return this.jwtService.sign(
             {
                 sessionId: nanoid(32),
+                su: this.subpageConfigService.getEncryptedSubpageConfigUuid(uuid),
             },
             {
-                expiresIn: '1h',
+                expiresIn: '33m',
             },
         );
     }
@@ -251,40 +251,54 @@ export class RootService {
         shortUuid: string,
     ): Promise<void> {
         try {
-            const cookieJwt = await this.generateJwtForCookie();
-
             const subscriptionDataResponse = await this.axiosService.getSubscriptionInfo(
                 clientIp,
                 shortUuid,
             );
 
             if (!subscriptionDataResponse.isOk || !subscriptionDataResponse.response) {
-                this.logger.error(`Get subscription info failed, shortUuid: ${shortUuid}`);
-
                 res.socket?.destroy();
                 return;
             }
 
+            const subpageConfigResponse = await this.axiosService.getSubpageConfig(
+                shortUuid,
+                req.headers,
+            );
+
+            if (!subpageConfigResponse.isOk || !subpageConfigResponse.response) {
+                res.socket?.destroy();
+                return;
+            }
+
+            const subpageConfig = subpageConfigResponse.response;
+
+            if (subpageConfig.webpageAllowed === false) {
+                this.logger.log(`Webpage access is not allowed by Remnawave's SRR.`);
+                res.socket?.destroy();
+                return;
+            }
+
+            const baseSettings = this.subpageConfigService.getBaseSettings(
+                subpageConfig.subpageConfigUuid,
+            );
+
             const subscriptionData = subscriptionDataResponse.response;
 
-            if (!this.subscriptionUiDisplayRawKeys) {
+            if (!baseSettings.showConnectionKeys) {
                 subscriptionData.response.links = [];
                 subscriptionData.response.ssConfLinks = {};
             }
 
-            res.cookie('session', cookieJwt, {
+            res.cookie('session', this.generateJwtForCookie(subpageConfig.subpageConfigUuid), {
                 httpOnly: true,
                 secure: true,
-                maxAge: 3_600_000, // 1 hour
+                maxAge: 1_800_000, // 30 minutes
             });
 
             res.render('index', {
-                metaTitle: this.configService
-                    .getOrThrow<string>('META_TITLE')
-                    .replace(/^"|"$/g, ''),
-                metaDescription: this.configService
-                    .getOrThrow<string>('META_DESCRIPTION')
-                    .replace(/^"|"$/g, ''),
+                metaTitle: baseSettings.metaTitle,
+                metaDescription: baseSettings.metaDescription,
                 panelData: Buffer.from(JSON.stringify(subscriptionData)).toString('base64'),
             });
         } catch (error) {
