@@ -23,6 +23,8 @@ import {
     TRequestTemplateTypeKeys,
 } from '@remnawave/backend-contract';
 
+import { IGNORED_HEADERS } from '@common/constants';
+
 import { ICommandResponse } from '../types/command-response.type';
 
 @Injectable()
@@ -343,11 +345,18 @@ export class AxiosService implements OnModuleInit {
                 basePath += '/' + clientType;
             }
 
+            const safeHeaders = Object.fromEntries(
+                Object.entries(headers).filter(([key]) => !IGNORED_HEADERS.has(key.toLowerCase())),
+            );
+
             const response = await this.axiosInstance.request<unknown>({
                 method: 'GET',
                 url: basePath,
                 headers: {
-                    ...this.filterHeaders(headers),
+                    ...safeHeaders,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate, private, max-age=0',
+                    Pragma: 'no-cache',
+                    Expires: '0',
                     [REMNAWAVE_REAL_IP_HEADER]: clientIp,
                 },
             });
@@ -365,39 +374,5 @@ export class AxiosService implements OnModuleInit {
 
             return null;
         }
-    }
-
-    private filterHeaders(headers: NodeJS.Dict<string | string[]>): NodeJS.Dict<string | string[]> {
-        const allowedHeaders = [
-            'user-agent',
-            'accept',
-            'accept-language',
-            'accept-encoding',
-            'x-hwid',
-            'x-device-os',
-            'x-ver-os',
-            'x-device-model',
-            'x-app-version',
-            'x-device-locale',
-            'x-client',
-        ];
-
-        const filteredHeaders = Object.fromEntries(
-            Object.entries(headers)
-                .filter(([key]) => {
-                    const lowerKey = key.toLowerCase();
-                    // Исключаем заголовки кэширования, чтобы панель не возвращала 304
-                    if (
-                        lowerKey === 'if-none-match' ||
-                        lowerKey === 'if-modified-since' ||
-                        lowerKey === 'cache-control'
-                    ) {
-                        return false;
-                    }
-                    return allowedHeaders.includes(lowerKey);
-                }),
-        );
-
-        return filteredHeaders;
     }
 }

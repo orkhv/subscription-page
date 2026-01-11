@@ -12,6 +12,7 @@ import { Logger } from '@nestjs/common';
 import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 
 import { AxiosService } from '@common/axios/axios.service';
+import { IGNORED_HEADERS } from '@common/constants';
 import { sanitizeUsername } from '@common/utils';
 
 import { SubpageConfigService } from './subpage-config.service';
@@ -170,18 +171,7 @@ export class RootService {
 
             if (subscriptionDataResponse.headers) {
                 Object.entries(subscriptionDataResponse.headers)
-                    .filter(([key]) => {
-                        const ignoredHeaders = [
-                            'transfer-encoding',
-                            'content-length',
-                            'server',
-                            'etag',
-                            'last-modified',
-                            'cache-control',
-                            'expires',
-                        ];
-                        return !ignoredHeaders.includes(key.toLowerCase());
-                    })
+                    .filter(([key]) => !IGNORED_HEADERS.has(key.toLowerCase()))
                     .forEach(([key, value]) => {
                         res.setHeader(key, value);
                     });
