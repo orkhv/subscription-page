@@ -23,7 +23,7 @@ export class RootService {
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKeys: string[];
-
+    private readonly mlDropRevokedSubscriptions: boolean;
     constructor(
         private readonly configService: ConfigService,
         private readonly jwtService: JwtService,
@@ -32,6 +32,9 @@ export class RootService {
     ) {
         this.isMarzbanLegacyLinkEnabled = this.configService.getOrThrow<boolean>(
             'MARZBAN_LEGACY_LINK_ENABLED',
+        );
+        this.mlDropRevokedSubscriptions = this.configService.getOrThrow<boolean>(
+            'MARZBAN_LEGACY_DROP_REVOKED_SUBSCRIPTIONS',
         );
 
         const marzbanSecretKeys = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
@@ -79,6 +82,12 @@ export class RootService {
                             `Decoded Marzban username is not found in Remnawave, decoded username: ${sanitizedUsername}`,
                         );
 
+                        res.socket?.destroy();
+                        return;
+                    } else if (
+                        this.mlDropRevokedSubscriptions &&
+                        userInfo.response.response.subRevokedAt !== null
+                    ) {
                         res.socket?.destroy();
                         return;
                     }
