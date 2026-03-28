@@ -31,8 +31,7 @@ export const configSchema = z
         MARZBAN_LEGACY_DROP_REVOKED_SUBSCRIPTIONS: z
             .string()
             .default('false')
-            .transform((val) => (val === '' ? 'false' : val))
-            .refine((val) => val === 'true' || val === 'false', 'Must be "true" or "false".'),
+            .transform((val) => val === 'true'),
         INTERNAL_JWT_SECRET: z.string(),
     })
     .superRefine((data, ctx) => {
