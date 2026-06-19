@@ -309,7 +309,7 @@ export class AxiosService implements OnModuleInit {
                 };
             }>({
                 method: 'GET',
-                url: `api/users/by-short-uuid/${shortUuid}`,
+                url: `api/users/by-short-uuid/${encodeURIComponent(shortUuid)}`,
                 headers,
             });
 
