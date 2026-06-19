@@ -10,7 +10,6 @@ import { exit } from 'node:process';
 import { table } from 'table';
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
 import {
     GetMetadataCommand,
@@ -23,6 +22,7 @@ import {
     TRequestTemplateTypeKeys,
 } from '@remnawave/backend-contract';
 
+import { TypedConfigService } from '@common/config/app-config';
 import { IGNORED_HEADERS } from '@common/constants';
 
 import { ICommandResponse } from '../types/command-response.type';
@@ -32,7 +32,7 @@ export class AxiosService implements OnModuleInit {
     public axiosInstance: AxiosInstance;
     private readonly logger = new Logger(AxiosService.name);
 
-    constructor(private readonly configService: ConfigService) {
+    constructor(private readonly configService: TypedConfigService) {
         this.axiosInstance = axios.create({
             baseURL: this.configService.getOrThrow('REMNAWAVE_PANEL_URL'),
             timeout: 10_000,
@@ -42,16 +42,16 @@ export class AxiosService implements OnModuleInit {
             },
         });
 
-        const caddyAuthApiToken = this.configService.get<string | undefined>(
-            'CADDY_AUTH_API_TOKEN',
-        );
+        const caddyAuthApiToken = this.configService.get('CADDY_AUTH_API_TOKEN');
 
-        const cloudflareZeroTrustClientId = this.configService.get<string | undefined>(
+        const cloudflareZeroTrustClientId = this.configService.get(
             'CLOUDFLARE_ZERO_TRUST_CLIENT_ID',
         );
-        const cloudflareZeroTrustClientSecret = this.configService.get<string | undefined>(
+        const cloudflareZeroTrustClientSecret = this.configService.get(
             'CLOUDFLARE_ZERO_TRUST_CLIENT_SECRET',
         );
+
+        const egamesCookie = this.configService.get('EGAMES_COOKIE');
 
         if (caddyAuthApiToken) {
             this.axiosInstance.defaults.headers.common['X-Api-Key'] = caddyAuthApiToken;
@@ -67,6 +67,10 @@ export class AxiosService implements OnModuleInit {
         if (this.configService.getOrThrow('REMNAWAVE_PANEL_URL').startsWith('http://')) {
             this.axiosInstance.defaults.headers.common['X-Forwarded-For'] = '127.0.0.1';
             this.axiosInstance.defaults.headers.common['X-Forwarded-Proto'] = 'https';
+        }
+
+        if (egamesCookie) {
+            this.axiosInstance.defaults.headers.common['Cookie'] = egamesCookie;
         }
     }
 
@@ -138,7 +142,7 @@ export class AxiosService implements OnModuleInit {
         try {
             const response = await this.axiosInstance.request<GetUserByUsernameCommand.Response>({
                 method: GetUserByUsernameCommand.endpointDetails.REQUEST_METHOD,
-                url: GetUserByUsernameCommand.url(username),
+                url: GetUserByUsernameCommand.url(encodeURIComponent(username)),
                 headers: {
                     [REMNAWAVE_REAL_IP_HEADER]: clientIp,
                 },
@@ -172,7 +176,7 @@ export class AxiosService implements OnModuleInit {
             const response =
                 await this.axiosInstance.request<GetSubscriptionPageConfigCommand.Response>({
                     method: GetSubscriptionPageConfigCommand.endpointDetails.REQUEST_METHOD,
-                    url: GetSubscriptionPageConfigCommand.url(uuid),
+                    url: GetSubscriptionPageConfigCommand.url(encodeURIComponent(uuid)),
                 });
 
             return {
@@ -230,7 +234,7 @@ export class AxiosService implements OnModuleInit {
             const response =
                 await this.axiosInstance.request<GetSubscriptionInfoByShortUuidCommand.Response>({
                     method: GetSubscriptionInfoByShortUuidCommand.endpointDetails.REQUEST_METHOD,
-                    url: GetSubscriptionInfoByShortUuidCommand.url(shortUuid),
+                    url: GetSubscriptionInfoByShortUuidCommand.url(encodeURIComponent(shortUuid)),
                     headers: {
                         [REMNAWAVE_REAL_IP_HEADER]: clientIp,
                     },
@@ -259,7 +263,7 @@ export class AxiosService implements OnModuleInit {
             const response =
                 await this.axiosInstance.request<GetSubpageConfigByShortUuidCommand.Response>({
                     method: GetSubpageConfigByShortUuidCommand.endpointDetails.REQUEST_METHOD,
-                    url: GetSubpageConfigByShortUuidCommand.url(shortUuid),
+                    url: GetSubpageConfigByShortUuidCommand.url(encodeURIComponent(shortUuid)),
                     data: {
                         requestHeaders,
                     },
@@ -341,17 +345,15 @@ export class AxiosService implements OnModuleInit {
         headers: RawAxiosResponseHeaders | AxiosResponseHeaders;
     } | null> {
         try {
-            let basePath = 'api/sub/' + shortUuid;
+            let basePath = 'api/sub/' + encodeURIComponent(shortUuid);
 
             if (withClientType && clientType) {
-                basePath += '/' + clientType;
+                basePath += '/' + encodeURIComponent(clientType);
             }
 
             const safeHeaders = Object.fromEntries(
                 Object.entries(headers).filter(([key]) => !IGNORED_HEADERS.has(key.toLowerCase())),
             );
-
-            this.logger.debug(`Request headers: ${JSON.stringify(safeHeaders, null, 0)}`);
 
             const response = await this.axiosInstance.request<unknown>({
                 method: 'GET',
@@ -374,13 +376,11 @@ export class AxiosService implements OnModuleInit {
             if (error instanceof AxiosError) {
                 if (error.response) {
                     if (error.response.status === 404) {
-                        this.logger.warn(`Subscription ${shortUuid} not found in Remnawave.`);
                         return null;
                     }
                 }
 
                 this.logger.error(`Error in GetSubscription Request: ${error.message}`);
-                this.logger.debug(`Error response: ${error.response?.data}`);
             } else {
                 this.logger.error(`Error in GetSubscription Request: ${error}`);
             }
