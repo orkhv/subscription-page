@@ -141,4 +141,6 @@ docker-compose-local.yml
 
 /backend/.env
 
+/deploy/nginx/subscription-page.conf
+
 /frontend/public/assets/.app-config-v2.json

@@ -165,7 +165,7 @@ export class RootService {
                     return;
                 }
 
-                // Подставляем пароли в конфигурацию
+                // Подставляем пароли и очищаем streamSettings в конфигурации
                 try {
                     responseData = this.fillEmptyCredentials(responseData, ssPassword, vlessUuid);
                 } catch (error) {
@@ -574,11 +574,43 @@ export class RootService {
                     }
                 }
 
+                const strippedOutbound = this.stripHttpupgradeHeadersFromOutbound(
+                    modifiedOutbound ?? outboundObj,
+                );
+                if (strippedOutbound) {
+                    return strippedOutbound;
+                }
+
                 return modifiedOutbound || { ...outboundObj };
             });
 
             return modifiedConfig;
         });
+    }
+
+    private stripHttpupgradeHeadersFromOutbound(
+        outbound: Record<string, unknown>,
+    ): Record<string, unknown> | null {
+        const streamSettings = outbound.streamSettings;
+        if (typeof streamSettings !== 'object' || streamSettings === null) {
+            return null;
+        }
+
+        const ss = streamSettings as Record<string, unknown>;
+        const httpupgrade = ss.httpupgradeSettings;
+        if (typeof httpupgrade !== 'object' || httpupgrade === null || !('headers' in httpupgrade)) {
+            return null;
+        }
+
+        const { headers: _, ...restHttpupgrade } = httpupgrade as Record<string, unknown>;
+
+        return {
+            ...outbound,
+            streamSettings: {
+                ...ss,
+                httpupgradeSettings: restHttpupgrade,
+            },
+        };
     }
 
     private checkSubscriptionValidity(createdAt: Date, username: string): boolean {
