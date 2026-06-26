@@ -165,7 +165,7 @@ export class RootService {
                     return;
                 }
 
-                // Подставляем пароли и очищаем streamSettings в конфигурации
+                // Подставляем пароли и убираем Host из httpupgrade headers в конфигурации
                 try {
                     responseData = this.fillEmptyCredentials(responseData, ssPassword, vlessUuid);
                 } catch (error) {
@@ -598,17 +598,30 @@ export class RootService {
 
         const ss = streamSettings as Record<string, unknown>;
         const httpupgrade = ss.httpupgradeSettings;
-        if (typeof httpupgrade !== 'object' || httpupgrade === null || !('headers' in httpupgrade)) {
+        if (typeof httpupgrade !== 'object' || httpupgrade === null) {
             return null;
         }
 
-        const { headers: _, ...restHttpupgrade } = httpupgrade as Record<string, unknown>;
+        const httpupgradeObj = httpupgrade as Record<string, unknown>;
+        const headers = httpupgradeObj.headers;
+        if (typeof headers !== 'object' || headers === null || !('Host' in headers)) {
+            return null;
+        }
+
+        const { Host: _, ...restHeaders } = headers as Record<string, unknown>;
+        const newHttpupgrade: Record<string, unknown> = { ...httpupgradeObj };
+
+        if (Object.keys(restHeaders).length === 0) {
+            delete newHttpupgrade.headers;
+        } else {
+            newHttpupgrade.headers = restHeaders;
+        }
 
         return {
             ...outbound,
             streamSettings: {
                 ...ss,
-                httpupgradeSettings: restHttpupgrade,
+                httpupgradeSettings: newHttpupgrade,
             },
         };
     }
