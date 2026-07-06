@@ -69,6 +69,7 @@ async function bootstrap(): Promise<void> {
     });
 
     app.disable('x-powered-by');
+    app.set('etag', false);
 
     app.use(cookieParser());
 
